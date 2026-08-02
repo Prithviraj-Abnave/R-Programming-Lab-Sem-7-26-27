@@ -1,7 +1,0 @@
-# R temporary files
-.RData
-.Rhistory
-.Rproj.user/
-
-# Large CSV data files (optional — remove lines below if you want to track them)
-# *.csv
