@@ -1,0 +1,312 @@
+# Air Quality Data Cleaning - Beijing Aotizhongxin Station
+# Practical: Loops, Functions, Error Handling & Missing Data Management
+
+# ---- TASK 1: Import and Inspect ----
+
+setwd("C:/Users/admin/Desktop/SEM 7/आर language/Lab/Lab 1")
+
+df <- tryCatch(
+  expr = {
+    result <- read.csv("PRSA_Data_Aotizhongxin_20130301-20170228.csv")
+    cat("File loaded without issues.\n")
+    result
+  },
+  error = function(err) {
+    if (grepl("cannot open", err$message))
+      cat("Could not open the file — check permissions.\n")
+    else if (grepl("No such file", err$message))
+      cat("File not found — verify path and filename.\n")
+    else
+      cat("Unexpected file error:", err$message, "\n")
+    return(NULL)
+  },
+  warning = function(wrn) {
+    cat("Import warning:", wrn$message, "\n")
+    return(read.csv("PRSA_Data_Aotizhongxin_20130301-20170228.csv"))
+  }
+)
+
+if (is.null(df)) stop("Import failed. Fix the issue and rerun.")
+
+# (i) First six records
+cat("\n--- First 6 Rows ---\n")
+print(head(df))
+
+# (ii) Dataset structure
+cat("\n--- Dataset Structure ---\n")
+str(df)
+
+# (iii) Dimensions
+cat("\nDimensions:", nrow(df), "rows x", ncol(df), "columns\n")
+
+# (iv) Presence of missing values
+cat("Contains missing values:", any(is.na(df)), "\n")
+
+# (v) Total missing count
+cat("Total NAs across dataset:", sum(is.na(df)), "\n")
+
+
+# ---- TASK 2: Difference Between NA, NULL, and NaN ----
+
+cat("\n--- Demonstrating NA ---\n")
+sample_temps <- c(22.5, NA, 18.3, 25.1)
+cat("Vector:", sample_temps, "\n")
+cat("is.na check:", is.na(sample_temps), "\n")
+cat("Position of NA:", which(is.na(sample_temps)), "\n")
+
+cat("\n--- Demonstrating NULL ---\n")
+empty_obj <- NULL
+cat("Value:", empty_obj, "\n")
+cat("is.null:", is.null(empty_obj), "\n")
+cat("Length:", length(empty_obj), "\n")
+
+cat("\n--- Demonstrating NaN ---\n")
+bad_calc <- log(-1)
+cat("log(-1) =", bad_calc, "\n")
+cat("is.nan:", is.nan(bad_calc), "\n")
+cat("is.na also TRUE for NaN:", is.na(bad_calc), "\n")
+
+cat("\nSummary: NA = missing data point, NULL = empty object,",
+    "NaN = impossible math result\n")
+
+
+# ---- TASK 3: Missing-Value Summary Function ----
+
+missing_summary <- function(dataframe, columns) {
+  
+  rows <- nrow(dataframe)
+  
+  report <- data.frame(
+    Variable          = columns,
+    Total_Records     = rep(rows, length(columns)),
+    Missing_Values    = sapply(columns, function(col) sum(is.na(dataframe[[col]]))),
+    Missing_Percentage = sapply(columns, function(col)
+      round(sum(is.na(dataframe[[col]])) / rows * 100, 2)),
+    row.names = NULL
+  )
+  
+  # warn if any column exceeds 20% missing
+  high_miss <- report$Variable[report$Missing_Percentage > 20]
+  if (length(high_miss) > 0) {
+    for (v in high_miss) {
+      pct <- report$Missing_Percentage[report$Variable == v]
+      warning(paste0(v, " has ", pct, "% missing — exceeds 20% threshold!"))
+    }
+  }
+  
+  return(report)
+}
+
+target_cols <- c("PM2.5", "PM10", "SO2", "NO2", "TEMP", "WSPM", "wd")
+
+cat("\n--- Missing Value Report ---\n")
+miss_report <- missing_summary(df, target_cols)
+print(miss_report)
+
+
+# ---- Save BEFORE-cleaning counts for Task 8 ----
+
+counts_before <- setNames(
+  sapply(target_cols, function(col) sum(is.na(df[[col]]))),
+  target_cols
+)
+
+
+# ---- TASK 4: Invalid Numerical Results ----
+
+cat("\n--- Pollution Ratio Analysis ---\n")
+df$pollution_ratio <- df$PM2.5 / df$PM10
+
+cat("NA count :", sum(is.na(df$pollution_ratio)), "\n")
+cat("NaN count:", sum(is.nan(df$pollution_ratio)), "\n")
+cat("+Inf count:", sum(df$pollution_ratio == Inf, na.rm = TRUE), "\n")
+cat("-Inf count:", sum(df$pollution_ratio == -Inf, na.rm = TRUE), "\n")
+
+# clean up invalid entries
+bad_idx <- is.nan(df$pollution_ratio) | is.infinite(df$pollution_ratio)
+df$pollution_ratio[bad_idx] <- NA
+
+cat("\nPost-cleanup:\n")
+cat("NA:", sum(is.na(df$pollution_ratio)),
+    "| NaN:", sum(is.nan(df$pollution_ratio)),
+    "| Inf:", sum(is.infinite(df$pollution_ratio)), "\n")
+
+
+# ---- TASK 5: Loop-Based Numerical Imputation ----
+
+cat("\n--- Median Imputation (Numeric Columns) ---\n")
+
+num_cols <- c("PM2.5", "PM10", "SO2", "NO2", "TEMP", "WSPM")
+
+for (col_name in num_cols) {
+  
+  if (!(col_name %in% colnames(df))) {
+    cat(col_name, "not found in data — skipped.\n")
+    next
+  }
+  
+  na_before  <- sum(is.na(df[[col_name]]))
+  fill_value <- median(df[[col_name]], na.rm = TRUE)
+  
+  df[[col_name]][is.na(df[[col_name]])] <- fill_value
+  
+  na_after <- sum(is.na(df[[col_name]]))
+  
+  cat(sprintf("  %-6s | Before: %4d | Median: %7.2f | After: %d\n",
+              col_name, na_before, fill_value, na_after))
+}
+
+
+# ---- TASK 6: Categorical Imputation (Wind Direction) ----
+
+cat("\n--- Mode Imputation for wd ---\n")
+
+calculate_mode <- function(vec) {
+  vec <- vec[!is.na(vec)]
+  freq <- table(vec)
+  names(freq)[which.max(freq)]
+}
+
+wd_na_before <- sum(is.na(df$wd))
+wd_mode      <- calculate_mode(df$wd)
+df$wd[is.na(df$wd)] <- wd_mode
+wd_na_after  <- sum(is.na(df$wd))
+
+cat("Mode:", wd_mode, "\n")
+cat("Before:", wd_na_before, "| After:", wd_na_after, "\n")
+
+
+# ---- TASK 7: Reusable Error-Handled Cleaning Function ----
+
+clean_variable <- function(dataset, var_name) {
+  tryCatch(
+    expr = {
+      # existence check
+      if (!(var_name %in% colnames(dataset)))
+        stop(paste0("'", var_name, "' does not exist in the dataset."))
+      
+      col <- dataset[[var_name]]
+      
+      # type check
+      if (!is.numeric(col))
+        stop(paste0("'", var_name, "' is not numeric — use mode instead."))
+      
+      # all-NA check
+      if (all(is.na(col)))
+        stop(paste0("'", var_name, "' is entirely NA — cannot compute median."))
+      
+      med <- median(col, na.rm = TRUE)
+      
+      if (is.na(med))
+        stop(paste0("Median calculation failed for '", var_name, "'."))
+      
+      replaced   <- sum(is.na(col))
+      col[is.na(col)] <- med
+      
+      cat("[OK]", var_name, "— replaced", replaced,
+          "NAs with median", round(med, 2), "\n")
+      return(col)
+    },
+    error = function(e) {
+      cat("[FAIL]", e$message, "\n")
+      return(NULL)
+    }
+  )
+}
+
+# demonstration with different test cases
+cat("\n--- clean_variable() Tests ---\n")
+
+cat("Test A (numeric column): ")
+clean_variable(df, "O3")
+
+cat("Test B (missing column): ")
+clean_variable(df, "FAKE_COL")
+
+cat("Test C (categorical):    ")
+clean_variable(df, "station")
+
+cat("Test D (all-NA column):  ")
+temp_df <- df
+temp_df$dummy <- as.numeric(NA)
+clean_variable(temp_df, "dummy")
+
+
+# ---- TASK 8: Before vs After Comparison ----
+
+cat("\n--- Cleaning Comparison ---\n")
+
+counts_after <- setNames(
+  sapply(target_cols, function(col) sum(is.na(df[[col]]))),
+  target_cols
+)
+
+comparison <- data.frame(
+  Variable        = target_cols,
+  Missing_Before  = counts_before,
+  Missing_After   = counts_after,
+  Values_Replaced = counts_before - counts_after,
+  row.names       = NULL
+)
+
+print(comparison)
+
+if (all(counts_after == 0)) {
+  cat("\nAll selected missing values were resolved successfully.\n")
+} else {
+  cat("\nSome variables still contain missing values.\n")
+}
+
+
+# ---- TASK 9: Visualization ----
+
+cat("\n--- Generating Bar Chart ---\n")
+
+plot_data <- rbind(Before = counts_before, After = counts_after)
+
+png("missing_values_barplot.png", width = 850, height = 500, res = 100)
+
+mp <- barplot(
+  plot_data,
+  beside  = TRUE,
+  col     = c("#E74C3C", "#2ECC71"),
+  border  = NA,
+  main    = "Missing Values: Before vs After Cleaning",
+  xlab    = "Variable",
+  ylab    = "Missing Count",
+  ylim    = c(0, max(plot_data) * 1.25),
+  las     = 1
+)
+
+text(mp, plot_data, labels = plot_data, pos = 3, cex = 0.85)
+
+legend("topright",
+       legend = c("Before", "After"),
+       fill   = c("#E74C3C", "#2ECC71"),
+       border = NA, bty = "n")
+
+dev.off()
+cat("Chart saved: missing_values_barplot.png\n")
+
+
+# ---- TASK 10: Export Cleaned Data ----
+
+write.csv(df, "cleaned_air_quality_data.csv", row.names = FALSE)
+cat("Exported: cleaned_air_quality_data.csv\n")
+cat("Shape:", nrow(df), "rows x", ncol(df), "cols\n")
+
+
+# ---- INTERPRETATION ----
+
+cat("\n--- Interpretation ---\n")
+cat("The Aotizhongxin station dataset comprised 35,064 hourly records with
+18 variables covering pollutant concentrations and meteorological readings.
+Missing values were found in PM2.5 (925), PM10 (718), SO2 (935), NO2 (1023),
+TEMP (20), WSPM (14), and wd (81). Numerical columns were imputed with the
+median, chosen for its resistance to the extreme outliers common in pollution
+measurements. The wind-direction column (wd) was filled using the mode.
+A derived pollution_ratio (PM2.5/PM10) was screened for NaN and infinity
+before cleaning. Error handling via tryCatch() ensured robustness against
+missing columns, wrong data types, and all-NA vectors. The final comparison
+table and bar chart confirm zero remaining NAs in all target variables,
+yielding a clean dataset ready for downstream environmental analysis.\n")
