@@ -1,11 +1,12 @@
-#Step 1: Install required packages
+# Step 1: Install required packages
 
 install.packages(c(
   "tidyverse",
   "jsonlite",
   "readxl",
   "DBI",
-  "RSQLite"
+  "RSQLite",
+  "writexl"
 ))
 
 # Load required libraries
@@ -17,7 +18,7 @@ library(RSQLite)
 
 getwd()
 
-#Step 2: Read the files
+# Step 2: Read the files
 retail <- read_excel("Online Retail.xlsx")
 
 head(retail)
@@ -40,6 +41,17 @@ sum(retail$UnitPrice <= 0, na.rm = TRUE)
 
 # Step 4: Clean the dataset
 
+# Cleaning Decisions:
+# 1. Rows with missing CustomerID are removed because customer identification
+#    is essential for customer-level analysis and segmentation.
+# 2. Rows with missing Description are removed as they indicate incomplete
+#    product records that cannot be meaningfully analyzed.
+# 3. Rows with Quantity <= 0 are removed because zero or negative quantities
+#    represent cancellations or returns, not valid sales transactions.
+# 4. Rows with UnitPrice <= 0 are removed because zero or negative prices
+#    indicate free items or data errors, which would distort revenue calculations.
+# 5. Duplicate rows are removed using distinct() to avoid inflating metrics.
+
 retail_clean <- retail %>%
   filter(
     !is.na(CustomerID),
@@ -51,12 +63,6 @@ retail_clean <- retail %>%
 
 # Check dimensions after cleaning
 dim(retail_clean)
-
-# Calculate Revenue
-retail_clean <- retail_clean %>%
-  mutate(
-    Revenue = Quantity * UnitPrice
-  )
 
 # View cleaned data
 head(retail_clean)
@@ -76,17 +82,6 @@ sum(duplicated(retail_clean))
 # Final dimensions
 dim(retail_clean)
 
-# Create Revenue attribute
-retail_clean <- retail_clean %>%
-  mutate(
-    Revenue = Quantity * UnitPrice
-  )
-
-# Check the result
-head(retail_clean)
-
-# Check dimensions
-dim(retail_clean)
 
 # Create transactions dataset
 transactions <- retail_clean %>%
@@ -169,6 +164,16 @@ colnames(customers)
 
 # Step 8: Integrate the three datasets
 
+# Justification for using left_join():
+# left_join is chosen over inner_join to retain ALL transaction records from the
+# primary transactions dataset, even if a matching product or customer record is
+# not found. This allows us to:
+# 1. Preserve the complete transaction history without data loss.
+# 2. Identify and investigate unmatched records (NAs) after the join.
+# 3. Understand data quality issues across the different source systems.
+# Using inner_join would silently drop unmatched transactions, potentially
+# losing valuable sales data and masking data integration problems.
+
 # Join transactions with products
 sales_with_products <- transactions %>%
   left_join(products, by = "StockCode")
@@ -217,8 +222,9 @@ total_revenue <- retail_final %>%
 cat(
   "Total Sales Revenue: £",
   format(round(total_revenue$Total_Revenue, 2),
-         big.mark = ",",
-         nsmall = 2),
+    big.mark = ",",
+    nsmall = 2
+  ),
   "\n"
 )
 
@@ -237,9 +243,6 @@ top_products <- retail_final %>%
 
 top_products
 
-total_revenue
-
-top_products
 
 # Top 5 countries by revenue
 
@@ -347,6 +350,21 @@ head(country_analysis, 5)
 
 tail(country_analysis, 5)
 
+# Market Performance Observations:
+#
+# High-Performing Market: United Kingdom
+# The United Kingdom is the highest-performing market, contributing the vast
+# majority of total revenue and transaction volume. This is expected as the
+# company is UK-based, with a well-established customer base, strong brand
+# recognition, and efficient logistics infrastructure in its home market.
+#
+# Underperforming Market: Saudi Arabia (or similar low-revenue country)
+# Markets such as Saudi Arabia appear at the bottom of the revenue ranking
+# with minimal transactions and negligible revenue. This indicates very limited
+# market penetration, possibly due to lack of marketing presence, logistical
+# challenges in shipping, or cultural/regional product-market fit issues.
+# These markets represent potential growth opportunities if targeted strategically.
+
 # Step 16: Create SQLite database
 
 con <- dbConnect(
@@ -416,6 +434,33 @@ sql_country_revenue <- dbGetQuery(
 
 sql_country_revenue
 
-# Close SQLite    connection
+# ============================================================
+# Three Important Business Insights
+# ============================================================
+#
+# Insight 1: Revenue Concentration in a Single Market
+# The United Kingdom accounts for the overwhelming majority of total revenue,
+# indicating heavy dependence on a single market. This poses a significant
+# business risk — any disruption in the UK market (economic downturn, regulatory
+# changes, increased competition) could severely impact overall revenue.
+# The company should invest in expanding its presence in high-potential
+# international markets like Netherlands, Germany, and France.
+#
+# Insight 2: Premium Customers Drive Disproportionate Revenue
+# Customer segmentation reveals that the "Premium" category, while comprising
+# the smallest number of customers, contributes disproportionately to total
+# revenue. This follows the Pareto Principle (80/20 rule). The company should
+# implement loyalty programs, personalized marketing, and dedicated account
+# management to retain these high-value customers and reduce churn risk.
+#
+# Insight 3: Product Revenue is Highly Skewed
+# The top 5 products generate a significant share of total revenue, while the
+# vast majority of products contribute relatively little. The company should
+# ensure consistent stock availability for top-performing products, consider
+# bundling low-performing products with popular ones, and evaluate whether
+# underperforming products should be discontinued to optimize inventory costs.
+# ============================================================
+
+# Close SQLite connection
 
 dbDisconnect(con)
