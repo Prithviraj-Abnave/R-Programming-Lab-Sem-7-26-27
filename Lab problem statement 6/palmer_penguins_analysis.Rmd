@@ -1,0 +1,198 @@
+---
+title: "Palmer Penguins Statistical Analysis"
+author: "Student"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Introduction
+This report provides a comprehensive statistical analysis of the **Palmer Penguins** dataset. The objective is to investigate whether physical characteristics such as body mass and flipper length differ significantly across penguin species and sex.
+
+### Dataset Overview
+The dataset contains observations of penguins from three species (Adélie, Chinstrap, Gentoo) collected in the Palmer Archipelago, Antarctica.
+
+```{r load_libraries}
+library(palmerpenguins)
+library(dplyr)
+library(ggplot2)
+library(e1071)
+library(effsize)
+library(car)
+
+# Load dataset and remove NA values
+data("penguins")
+df <- na.omit(penguins)
+```
+
+---
+
+## 1. Descriptive Statistical Analysis
+We perform a descriptive analysis of the `body_mass_g` variable.
+
+```{r desc_stats}
+calc_stats <- function(x) {
+  c(
+    Mean = mean(x), Median = median(x),
+    Min = min(x), Max = max(x),
+    Var = var(x), SD = sd(x),
+    Q1 = quantile(x, 0.25), Q3 = quantile(x, 0.75),
+    IQR = IQR(x), Skewness = skewness(x), Kurtosis = kurtosis(x)
+  )
+}
+
+# Overall Statistics
+overall_stats <- calc_stats(df$body_mass_g)
+knitr::kable(as.data.frame(overall_stats), col.names = "Overall Body Mass (g)")
+
+# Species-wise Statistics
+species_stats <- df %>%
+  group_by(species) %>%
+  summarise(
+    Mean = mean(body_mass_g),
+    Median = median(body_mass_g),
+    Min = min(body_mass_g),
+    Max = max(body_mass_g),
+    Var = var(body_mass_g),
+    SD = sd(body_mass_g),
+    Q1 = quantile(body_mass_g, 0.25),
+    Q3 = quantile(body_mass_g, 0.75),
+    IQR = IQR(body_mass_g),
+    Skewness = skewness(body_mass_g),
+    Kurtosis = kurtosis(body_mass_g)
+  )
+knitr::kable(species_stats, digits = 2)
+```
+
+### Visualizations
+
+```{r visuals_1, fig.width=10, fig.height=4}
+p1 <- ggplot(df, aes(x = body_mass_g)) +
+  geom_histogram(fill = "skyblue", color = "black", bins = 30) +
+  theme_minimal() + labs(title = "Histogram of Body Mass")
+
+p2 <- ggplot(df, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot() + theme_minimal() + labs(title = "Boxplot by Species")
+
+p3 <- ggplot(df, aes(x = body_mass_g, fill = species)) +
+  geom_density(alpha = 0.5) + theme_minimal() + labs(title = "Density Plot by Species")
+
+cowplot::plot_grid(p1, p2, p3, ncol = 3)
+```
+
+---
+
+## 2. Hypothesis Testing
+Investigating whether male and female penguins have significantly different mean body masses.
+
+**Null Hypothesis ($H_0$):** Mean body mass of males = Mean body mass of females.
+**Alternative Hypothesis ($H_1$):** Mean body mass of males $\neq$ Mean body mass of females.
+
+### Normality Check
+```{r norm_check}
+male_mass <- df$body_mass_g[df$sex == "male"]
+female_mass <- df$body_mass_g[df$sex == "female"]
+
+shapiro.test(male_mass)
+shapiro.test(female_mass)
+```
+*Interpretation: The Shapiro-Wilk test indicates whether the data deviates significantly from normality.*
+
+```{r qq_plots, fig.width=8, fig.height=4}
+par(mfrow=c(1,2), mar=c(4,4,2,1))
+qqnorm(male_mass, main = "QQ Plot - Male Body Mass")
+qqline(male_mass, col = "red")
+qqnorm(female_mass, main = "QQ Plot - Female Body Mass")
+qqline(female_mass, col = "red")
+par(mfrow=c(1,1), mar=c(5,4,4,2) + 0.1)
+```
+
+### Independent Two-Sample t-test
+```{r ttest}
+t_test_result <- t.test(body_mass_g ~ sex, data = df)
+t_test_result
+
+# Effect Size
+cohen.d(body_mass_g ~ sex, data = df)
+```
+*Interpretation: A p-value < 0.05 indicates a significant difference between male and female body mass. Cohen's d provides the magnitude of this difference.*
+
+---
+
+## 3. One-Way ANOVA
+Investigating whether mean body mass differs among the three penguin species.
+
+### Assumptions Check
+```{r assumptions_anova}
+leveneTest(body_mass_g ~ species, data = df)
+```
+
+### ANOVA
+```{r anova}
+anova_res <- aov(body_mass_g ~ species, data = df)
+summary(anova_res)
+```
+
+### Post-hoc Analysis
+```{r posthoc}
+tukey_res <- TukeyHSD(anova_res)
+tukey_res
+plot(tukey_res)
+```
+
+---
+
+## 4. Non-Parametric Analysis
+If assumptions of ANOVA are violated, we use the Kruskal-Wallis test.
+
+```{r kruskal}
+kruskal.test(body_mass_g ~ species, data = df)
+```
+*Interpretation: Comparing this p-value to the one-way ANOVA helps confirm the robustness of our conclusions.*
+
+---
+
+## 5. Two-Way ANOVA
+Investigating the simultaneous effect of species and sex on penguin body mass.
+
+```{r twoway_anova}
+twoway_anova <- aov(body_mass_g ~ species * sex, data = df)
+summary(twoway_anova)
+```
+
+### Sex-wise Boxplot
+```{r boxplot_sex}
+ggplot(df, aes(x = species, y = body_mass_g, fill = sex)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Boxplot of Body Mass by Species and Sex", x = "Species", y = "Body Mass (g)")
+```
+
+---
+
+## 6. Additional Analysis (Flipper Length)
+Repeat the ANOVA analysis using `flipper_length_mm`.
+
+```{r flipper_anova}
+anova_flipper <- aov(flipper_length_mm ~ species, data = df)
+summary(anova_flipper)
+
+tukey_flipper <- TukeyHSD(anova_flipper)
+tukey_flipper
+
+ggplot(df, aes(x = species, y = flipper_length_mm, fill = species)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Boxplot of Flipper Length by Species", x = "Species", y = "Flipper Length (mm)")
+```
+*Interpretation: The findings indicate whether flipper length shows consistent variations across species compared to body mass.*
+
+---
+## Conclusion
+In this analysis, descriptive statistics highlighted differences in body mass between penguin species and sexes. Hypothesis testing confirmed significant differences between males and females. ANOVA tests (One-way and Two-way) combined with Tukey's HSD post-hoc tests further validated that species have significantly distinct body masses and flipper lengths.
